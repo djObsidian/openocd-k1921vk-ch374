@@ -6702,6 +6702,119 @@ flash bank $@{_FLASHNAME@}1 fm4 0x00100000 0 0 0 \
 nor is Chip Erase (only Sector Erase is implemented).}
 @end deffn
 
+@deffn {Flash Driver} k1921vk028
+This drivers handles the NIIET K1921VK028 microcontroller's integrated NOR flash memories.
+There are 2 types of them: main flash "MFLASH" and boot flash "BFLASH" with different sizes.
+MFLASH and BFLASH also have main region and NVR region each.
+Flash size and sector layout are auto-configured by the driver.
+Full erase, single and block writes are applied to the flash type chosen.
+Driver also has special commands to perform all posible operations with this memories directly.
+
+@example
+flash bank $_CHIPNAME.flash k1921vk028 0 0 0 0 $_TARGETNAME
+@end example
+
+Some K1921VK028-specific commands are defined:
+
+@deffn Command {k1921vk028 read} (@option{mflash}|@option{bflash}) (@option{main}|@option{nvr}) address
+Read 16|4 32-bit words from MFLASH|BFLASH address in main|nvr region. Address should be 64|16 bytes aligned.
+@end deffn
+
+@deffn Command {k1921vk028 write} (@option{mflash}|@option{bflash}) (@option{main}|@option{nvr}) (@option{erase}|@option{save}|@option{none}) address (@option{data0 ... data3}|@option{data0 ... data15})
+Write up to 16|4 32-bit words to MFLASH|BFLASH address in main|nvr region. Unspecified values padded with 1's. Address should be 64|16 bytes aligned. There is option that selects between to erase modified sector, to save all data and to do nothing - only write.
+@end deffn
+
+@deffn Command {k1921vk028 mass_erase} (@option{mflash}|@option{bflash}) (@option{main}|@option{nvr})
+Erase entire MFLASH|BFLASH main|nvr region.
+@end deffn
+
+@deffn Command {k1921vk028 erase} (@option{mflash}|@option{bflash}) (@option{main}|@option{nvr}) first_sector_num last_sector_num
+Erase sectors of MFLASH|BFLASH main|nvr region, starting at sector first up to and including last.
+@end deffn
+
+@deffn Command {k1921vk028 protect} (@option{mflash}|@option{bflash}) (@option{main}|@option{nvr}) (@option{enable}|@option{disable})
+MFLASH|BFLASH main|nvr region write protect control. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk028 debug} (@option{enable}|@option{disable})
+Control core debug function. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk028 jtag} (@option{enable}|@option{disable})
+Control JTAG interface. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk028 extmem_cfg} rd_cycle wr_cycle ta_cycle mask (@option{8bit}|@option{16bit}) (@option{af1}|@option{af2})
+Configure external memory interface for boot - number of cycles (0x0 to 0xF), address mask (24 bits), data bus width and used IO alternative function.
+@end deffn
+
+@deffn Command {k1921vk028 srv_erase}
+Perform mass erase of all chip flash memories. Power on reset cycle and SERVEN pin tied low are required for the return to normal operation mode.
+@end deffn
+
+@deffn Command {k1921vk028 driver_info}
+Show information about flash driver.
+@end deffn
+
+@end deffn
+
+@deffn {Flash Driver} k1921vk035
+This drivers handles the NIIET K1921VK035 microcontroller's integrated NOR flash.
+Flash size and sector layout are auto-configured by the driver.
+Main flash memory is called "MFLASH" and has main region and NVR region.
+NVR region is NOT memory mapped by default, but it can be.
+Full erase, single and block writes are supported for both main and NVR regions,
+and applied to the region mapped to 0x00000000.
+Driver also has special commands to perform all posible operations with this memories directly.
+
+@example
+flash bank $_CHIPNAME.flash k1921vk035 0 0 0 0 $_TARGETNAME
+@end example
+
+Some K1921VK035-specific commands are defined:
+
+@deffn Command {k1921vk035 read} (@option{main}|@option{nvr}) address
+Read two 32-bit words from MFLASH main or NVR region address. Address should be 8 bytes aligned.
+@end deffn
+
+@deffn Command {k1921vk035 write} (@option{main}|@option{nvr}) (@option{erase}|@option{save}|@option{none}) address data0 data1
+Write two 32-bit words to MFLASH main or NVR region address. Address should be 8 bytes aligned. There is option that selects between to erase modified sector, to save all data and to do nothing - only write.
+@end deffn
+
+@deffn Command {k1921vk035 mass_erase} (@option{main}|@option{nvr})
+Erase entire MFLASH main or NVR region.
+@end deffn
+
+@deffn Command {k1921vk035 erase} (@option{main}|@option{nvr}) first_sector_num last_sector_num
+Erase sectors of MFLASH main or NVR region, starting at sector first up to and including last.
+@end deffn
+
+@deffn Command {k1921vk035 protect} (@option{main}|@option{nvr}) (@option{enable}|@option{disable})
+MFLASH main or NVR region write protect control. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk035 nvr_boot} (@option{enable}|@option{disable})
+Enable remapping MFLASH NVR region to 0x00000000. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk035 debug} (@option{enable}|@option{disable})
+Control core debug function. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk035 jtag} (@option{enable}|@option{disable})
+Control JTAG interface. Power on reset cycle is required for the new settings to take effect.
+@end deffn
+
+@deffn Command {k1921vk035 srv_erase}
+Perform mass erase of all chip flash memories. Power on reset cycle and SERVEN pin tied low are required for the return to normal operation mode.
+@end deffn
+
+@deffn Command {k1921vk035 driver_info}
+Show information about flash driver.
+@end deffn
+
+@end deffn
+
 @deffn {Flash Driver} {kinetis}
 @cindex kinetis
 Kx, KLx, KVx and KE1x members of the Kinetis microcontroller family
