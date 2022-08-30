@@ -80,6 +80,9 @@ if USB_BLASTER_DRIVER
 %C%_libocdjtagdrivers_la_LIBADD += %D%/usb_blaster/libocdusbblaster.la
 include %D%/usb_blaster/Makefile.am
 endif
+if FT232R
+DRIVERFILES += %D%/ft232r.c
+endif
 if AMTJTAGACCEL
 DRIVERFILES += %D%/amt_jtagaccel.c
 endif
@@ -144,13 +147,20 @@ endif
 if BCM2835GPIO
 DRIVERFILES += %D%/bcm2835gpio.c
 endif
-
 if OPENJTAG
 DRIVERFILES += %D%/openjtag.c
 endif
-
 if CMSIS_DAP
 DRIVERFILES += %D%/cmsis_dap_usb.c
+endif
+if IMX_GPIO
+DRIVERFILES += %D%/imx_gpio.c
+endif
+if KITPROG
+DRIVERFILES += %D%/kitprog.c
+endif
+if XDS110
+DRIVERFILES += %D%/xds110.c
 endif
 
 DRIVERHEADERS = \

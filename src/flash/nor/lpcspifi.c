@@ -186,7 +186,7 @@ static int lpcspifi_set_hw_mode(struct flash_bank *bank)
 		return retval;
 	}
 
-	LOG_DEBUG("Writing algorithm to working area at 0x%08" PRIx32,
+	LOG_DEBUG("Writing algorithm to working area at 0x%08" TARGET_PRIxADDR,
 		spifi_init_algorithm->address);
 	/* Write algorithm to working area */
 	retval = target_write_buffer(target,
@@ -942,4 +942,5 @@ struct flash_driver lpcspifi_flash = {
 	.erase_check = default_flash_blank_check,
 	.protect_check = lpcspifi_protect_check,
 	.info = get_lpcspifi_info,
+	.free_driver_priv = default_flash_free_driver_priv,
 };

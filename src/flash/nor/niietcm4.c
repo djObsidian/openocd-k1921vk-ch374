@@ -25,7 +25,7 @@
 #include <target/algorithm.h>
 #include <target/armv7m.h>
 
-#define FLASH_DRIVER_VER			0x00010000
+#define FLASH_DRIVER_VER			0x00010001
 #define CHIPID_ADDR					0xF0000000
 #define K1921VK01T_ID				0x00000000
 
@@ -1145,12 +1145,16 @@ static int niietcm4_protect_check(struct flash_bank *bank)
 static int niietcm4_mass_erase(struct flash_bank *bank)
 {
 	struct target *target = bank->target;
+	struct niietcm4_flash_bank *niietcm4_info = bank->driver_priv;
 
 	int retval;
 	uint32_t flash_cmd;
 
 	/* start mass erase */
-	flash_cmd = FMC_MAGIC_KEY | FMC_FULL_ERASE;
+	if (niietcm4_info->bflash_info_remap)
+		flash_cmd = FMC_MAGIC_KEY | FMC_PAGEERASE_IFB;
+	else
+		flash_cmd = FMC_MAGIC_KEY | FMC_FULL_ERASE;
 	retval = target_write_u32(target, FMC, flash_cmd);
 	if (retval != ERROR_OK)
 		return retval;
@@ -1741,4 +1745,5 @@ struct flash_driver niietcm4_flash = {
 	.erase_check = default_flash_blank_check,
 	.protect_check = niietcm4_protect_check,
 	.info = get_niietcm4_info,
+	.free_driver_priv = default_flash_free_driver_priv,
 };

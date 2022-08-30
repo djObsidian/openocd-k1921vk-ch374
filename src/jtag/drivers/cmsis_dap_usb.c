@@ -206,6 +206,8 @@ static uint8_t queued_seq_buf[1024]; /* TODO: make dynamic / move into cmsis obj
 
 static int queued_retval;
 
+static uint8_t output_pins = SWJ_PIN_SRST | SWJ_PIN_TRST;
+
 static struct cmsis_dap *cmsis_dap_handle;
 
 static int cmsis_dap_usb_open(void)
@@ -596,7 +598,7 @@ static int cmsis_dap_swd_run_queue(void)
 {
 	uint8_t *buffer = cmsis_dap_handle->packet_buffer;
 
-	LOG_DEBUG("Executing %d queued transactions", pending_transfer_count);
+	LOG_DEBUG_IO("Executing %d queued transactions", pending_transfer_count);
 
 	if (queued_retval != ERROR_OK) {
 		LOG_DEBUG("Skipping due to previous errors: %d", queued_retval);
@@ -616,7 +618,7 @@ static int cmsis_dap_swd_run_queue(void)
 		uint8_t cmd = pending_transfers[i].cmd;
 		uint32_t data = pending_transfers[i].data;
 
-		LOG_DEBUG("%s %s reg %x %"PRIx32,
+		LOG_DEBUG_IO("%s %s reg %x %"PRIx32,
 				cmd & SWD_CMD_APnDP ? "AP" : "DP",
 				cmd & SWD_CMD_RnW ? "read" : "write",
 			  (cmd & SWD_CMD_A32) >> 1, data);
@@ -674,7 +676,7 @@ static int cmsis_dap_swd_run_queue(void)
 			uint32_t tmp = data;
 			idx += 4;
 
-			LOG_DEBUG("Read result: %"PRIx32, data);
+			LOG_DEBUG_IO("Read result: %"PRIx32, data);
 
 			/* Imitate posted AP reads */
 			if ((pending_transfers[i].cmd & SWD_CMD_APnDP) ||
@@ -725,6 +727,20 @@ static void cmsis_dap_swd_read_reg(uint8_t cmd, uint32_t *value, uint32_t ap_del
 {
 	assert(cmd & SWD_CMD_RnW);
 	cmsis_dap_swd_queue_cmd(cmd, value, 0);
+}
+
+static int cmsis_dap_get_serial_info(void)
+{
+	uint8_t *data;
+
+	int retval = cmsis_dap_cmd_DAP_Info(INFO_ID_SERNUM, &data);
+	if (retval != ERROR_OK)
+		return retval;
+
+	if (data[0]) /* strlen */
+		LOG_INFO("CMSIS-DAP: Serial# = %s", &data[1]);
+
+	return ERROR_OK;
 }
 
 static int cmsis_dap_get_version_info(void)
@@ -790,15 +806,20 @@ static int cmsis_dap_swd_switch_seq(enum swd_special_seq seq)
 	unsigned int s_len;
 	int retval;
 
-	/* First disconnect before connecting, Atmel EDBG needs it for SAMD/R/L/C */
-	cmsis_dap_cmd_DAP_Disconnect();
+	if ((output_pins & (SWJ_PIN_SRST | SWJ_PIN_TRST)) == (SWJ_PIN_SRST | SWJ_PIN_TRST)) {
+		/* Following workaround deasserts reset on most adapters.
+		 * Do not reconnect if a reset line is active!
+		 * Reconnecting would break connecting under reset. */
 
-	/* When we are reconnecting, DAP_Connect needs to be rerun, at
-	 * least on Keil ULINK-ME */
-	retval = cmsis_dap_cmd_DAP_Connect(seq == LINE_RESET || seq == JTAG_TO_SWD ?
-					   CONNECT_SWD : CONNECT_JTAG);
-	if (retval != ERROR_OK)
-		return retval;
+		/* First disconnect before connecting, Atmel EDBG needs it for SAMD/R/L/C */
+		cmsis_dap_cmd_DAP_Disconnect();
+
+		/* When we are reconnecting, DAP_Connect needs to be rerun, at
+		 * least on Keil ULINK-ME */
+		retval = cmsis_dap_cmd_DAP_Connect(CONNECT_SWD);
+		if (retval != ERROR_OK)
+			return retval;
+	}
 
 	switch (seq) {
 	case LINE_RESET:
@@ -821,23 +842,18 @@ static int cmsis_dap_swd_switch_seq(enum swd_special_seq seq)
 		return ERROR_FAIL;
 	}
 
-	return cmsis_dap_cmd_DAP_SWJ_Sequence(s_len, s);
+	retval = cmsis_dap_cmd_DAP_SWJ_Sequence(s_len, s);
+	if (retval != ERROR_OK)
+		return retval;
+
+	/* Atmel EDBG needs renew clock setting after SWJ_Sequence
+	 * otherwise default frequency is used */
+	return cmsis_dap_cmd_DAP_SWJ_Clock(jtag_get_speed_khz());
 }
 
 static int cmsis_dap_swd_open(void)
 {
 	int retval;
-
-	if (cmsis_dap_handle == NULL) {
-		/* SWD init */
-		retval = cmsis_dap_usb_open();
-		if (retval != ERROR_OK)
-			return retval;
-
-		retval = cmsis_dap_get_caps_info();
-		if (retval != ERROR_OK)
-			return retval;
-	}
 
 	if (!(cmsis_dap_handle->caps & INFO_CAPS_SWD)) {
 		LOG_ERROR("CMSIS-DAP: SWD not supported");
@@ -859,6 +875,22 @@ static int cmsis_dap_init(void)
 	int retval;
 	uint8_t *data;
 
+	retval = cmsis_dap_usb_open();
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = cmsis_dap_get_caps_info();
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = cmsis_dap_get_version_info();
+	if (retval != ERROR_OK)
+		return retval;
+
+	retval = cmsis_dap_get_serial_info();
+	if (retval != ERROR_OK)
+		return retval;
+
 	if (swd_mode) {
 		retval = cmsis_dap_swd_open();
 		if (retval != ERROR_OK)
@@ -866,16 +898,6 @@ static int cmsis_dap_init(void)
 	}
 
 	if (cmsis_dap_handle == NULL) {
-
-		/* JTAG init */
-		retval = cmsis_dap_usb_open();
-		if (retval != ERROR_OK)
-			return retval;
-
-		retval = cmsis_dap_get_caps_info();
-		if (retval != ERROR_OK)
-			return retval;
-
 		/* Connect in JTAG mode */
 		if (!(cmsis_dap_handle->caps & INFO_CAPS_JTAG)) {
 			LOG_ERROR("CMSIS-DAP: JTAG not supported");
@@ -888,10 +910,6 @@ static int cmsis_dap_init(void)
 
 		LOG_INFO("CMSIS-DAP: Interface Initialised (JTAG)");
 	}
-
-	retval = cmsis_dap_get_version_info();
-	if (retval != ERROR_OK)
-		return retval;
 
 	/* INFO_ID_PKT_SZ - short */
 	retval = cmsis_dap_cmd_DAP_Info(INFO_ID_PKT_SZ, &data);
@@ -952,11 +970,14 @@ static int cmsis_dap_init(void)
 	retval = cmsis_dap_cmd_DAP_TFER_Configure(0, 64, 0);
 	if (retval != ERROR_OK)
 		return ERROR_FAIL;
-	/* Data Phase (bit 2) must be set to 1 if sticky overrun
-	 * detection is enabled */
-	retval = cmsis_dap_cmd_DAP_SWD_Configure(0);	/* 1 TRN, no Data Phase */
-	if (retval != ERROR_OK)
-		return ERROR_FAIL;
+
+	if (swd_mode) {
+		/* Data Phase (bit 2) must be set to 1 if sticky overrun
+		 * detection is enabled */
+		retval = cmsis_dap_cmd_DAP_SWD_Configure(0);	/* 1 TRN, no Data Phase */
+		if (retval != ERROR_OK)
+			return ERROR_FAIL;
+	}
 
 	retval = cmsis_dap_cmd_DAP_LED(0x03);		/* Both LEDs on */
 	if (retval != ERROR_OK)
@@ -1001,14 +1022,14 @@ static void cmsis_dap_execute_reset(struct jtag_command *cmd)
 {
 	/* Set both TRST and SRST even if they're not enabled as
 	 * there's no way to tristate them */
-	uint8_t pins = 0;
 
+	output_pins = 0;
 	if (!cmd->cmd.reset->srst)
-		pins |= SWJ_PIN_SRST;
+		output_pins |= SWJ_PIN_SRST;
 	if (!cmd->cmd.reset->trst)
-		pins |= SWJ_PIN_TRST;
+		output_pins |= SWJ_PIN_TRST;
 
-	int retval = cmsis_dap_cmd_DAP_SWJ_Pins(pins,
+	int retval = cmsis_dap_cmd_DAP_SWJ_Pins(output_pins,
 			SWJ_PIN_TRST | SWJ_PIN_SRST, 0, NULL);
 	if (retval != ERROR_OK)
 		LOG_ERROR("CMSIS-DAP: Interface reset failed");
@@ -1441,6 +1462,12 @@ static void cmsis_dap_execute_stableclocks(struct jtag_command *cmd)
 	cmsis_dap_stableclocks(cmd->cmd.runtest->num_cycles);
 }
 
+static void cmsis_dap_execute_tms(struct jtag_command *cmd)
+{
+	DEBUG_JTAG_IO("TMS: %d bits", cmd->cmd.tms->num_bits);
+	cmsis_dap_cmd_DAP_SWJ_Sequence(cmd->cmd.tms->num_bits, cmd->cmd.tms->bits);
+}
+
 /* TODO: Is there need to call cmsis_dap_flush() for the JTAG_PATHMOVE,
  * JTAG_RUNTEST, JTAG_STABLECLOCKS? */
 static void cmsis_dap_execute_command(struct jtag_command *cmd)
@@ -1471,6 +1498,8 @@ static void cmsis_dap_execute_command(struct jtag_command *cmd)
 			cmsis_dap_execute_stableclocks(cmd);
 			break;
 		case JTAG_TMS:
+			cmsis_dap_execute_tms(cmd);
+			break;
 		default:
 			LOG_ERROR("BUG: unknown JTAG command type 0x%X encountered", cmd->type);
 			exit(-1);
@@ -1493,13 +1522,11 @@ static int cmsis_dap_execute_queue(void)
 
 static int cmsis_dap_speed(int speed)
 {
-	if (speed > DAP_MAX_CLOCK) {
-		LOG_INFO("reduce speed request: %dkHz to %dkHz maximum", speed, DAP_MAX_CLOCK);
-		speed = DAP_MAX_CLOCK;
-	}
+	if (speed > DAP_MAX_CLOCK)
+		LOG_INFO("High speed (adapter_khz %d) may be limited by adapter firmware.", speed);
 
 	if (speed == 0) {
-		LOG_INFO("RTCK not supported");
+		LOG_ERROR("RTCK not supported. Set nonzero adapter_khz.");
 		return ERROR_JTAG_NOT_IMPLEMENTED;
 	}
 
@@ -1635,6 +1662,7 @@ static const char * const cmsis_dap_transport[] = { "swd", "jtag", NULL };
 
 struct jtag_interface cmsis_dap_interface = {
 	.name = "cmsis-dap",
+	.supported = DEBUG_CAP_TMS_SEQ,
 	.commands = cmsis_dap_command_handlers,
 	.swd = &cmsis_dap_swd_driver,
 	.transports = cmsis_dap_transport,

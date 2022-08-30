@@ -27,17 +27,21 @@
 
 /* STM32L4xxx series for reference.
  *
- * RM0351
- * http://www.st.com/st-web-ui/static/active/en/resource/technical/document/reference_manual/DM00083560.pdf
+ * RM0351 (STM32L4x5/STM32L4x6)
+ * http://www.st.com/resource/en/reference_manual/dm00083560.pdf
+ *
+ * RM0394 (STM32L43x/44x/45x/46x)
+ * http://www.st.com/resource/en/reference_manual/dm00151940.pdf
  *
  * STM32L476RG Datasheet (for erase timing)
- * http://www.st.com/st-web-ui/static/active/en/resource/technical/document/datasheet/DM00108832.pdf
+ * http://www.st.com/resource/en/datasheet/stm32l476rg.pdf
  *
- *
- * The device has normally two banks, but on 512 and 256 kiB devices an
- * option byte is available to map all sectors to the first bank.
+ * The RM0351 devices have normally two banks, but on 512 and 256 kiB devices
+ * an option byte is available to map all sectors to the first bank.
  * Both STM32 banks are treated as one OpenOCD bank, as other STM32 devices
  * handlers do!
+ *
+ * RM0394 devices have a single bank only.
  *
  */
 
@@ -183,6 +187,8 @@ static int stm32l4_wait_status_busy(struct flash_bank *bank, int timeout)
 
 	/* Clear but report errors */
 	if (status & FLASH_ERROR) {
+		if (retval == ERROR_OK)
+			retval = ERROR_FAIL;
 		/* If this operation fails, we ignore it and report the original
 		 * retval
 		 */
@@ -457,19 +463,8 @@ static int stm32l4_write_block(struct flash_bank *bank, const uint8_t *buffer,
 	struct armv7m_algorithm armv7m_info;
 	int retval = ERROR_OK;
 
-	/* See contrib/loaders/flash/stm32l4x.S for source and
-	 * hints how to generate the data!
-	 */
-
 	static const uint8_t stm32l4_flash_write_code[] = {
-		0xd0, 0xf8, 0x00, 0x80, 0xb8, 0xf1, 0x00, 0x0f, 0x21, 0xd0, 0x45, 0x68,
-		0xb8, 0xeb, 0x05, 0x06, 0x44, 0xbf, 0x76, 0x18, 0x36, 0x1a, 0x08, 0x2e,
-		0xf2, 0xd3, 0xdf, 0xf8, 0x36, 0x60, 0x66, 0x61, 0xf5, 0xe8, 0x02, 0x67,
-		0xe2, 0xe8, 0x02, 0x67, 0xbf, 0xf3, 0x4f, 0x8f, 0x26, 0x69, 0x16, 0xf4,
-		0x80, 0x3f, 0xfb, 0xd1, 0x16, 0xf0, 0xfa, 0x0f, 0x07, 0xd1, 0x8d, 0x42,
-		0x28, 0xbf, 0x00, 0xf1, 0x08, 0x05, 0x45, 0x60, 0x01, 0x3b, 0x13, 0xb1,
-		0xda, 0xe7, 0x00, 0x21, 0x41, 0x60, 0x30, 0x46, 0x00, 0xbe, 0x01, 0x00,
-		0x00, 0x00
+#include "../../../contrib/loaders/flash/stm32/stm32l4x.inc"
 	};
 
 	if (target_alloc_working_area(target, sizeof(stm32l4_flash_write_code),
@@ -481,8 +476,10 @@ static int stm32l4_write_block(struct flash_bank *bank, const uint8_t *buffer,
 	retval = target_write_buffer(target, write_algorithm->address,
 			sizeof(stm32l4_flash_write_code),
 			stm32l4_flash_write_code);
-	if (retval != ERROR_OK)
+	if (retval != ERROR_OK) {
+		target_free_working_area(target, write_algorithm);
 		return retval;
+	}
 
 	/* memory buffer */
 	while (target_alloc_working_area_try(target, buffer_size, &source) !=
@@ -614,8 +611,12 @@ static int stm32l4_probe(struct flash_bank *bank)
 
 	/* set max flash size depending on family */
 	switch (device_id & 0xfff) {
+	case 0x461:
 	case 0x415:
 		max_flash_size_in_kb = 1024;
+		break;
+	case 0x462:
+		max_flash_size_in_kb = 512;
 		break;
 	case 0x435:
 		max_flash_size_in_kb = 256;
@@ -643,6 +644,9 @@ static int stm32l4_probe(struct flash_bank *bank)
 
 	/* get options to for DUAL BANK. */
 	retval = target_read_u32(target, STM32_FLASH_OPTR, &options);
+
+	if (retval != ERROR_OK)
+		return retval;
 
 	/* only devices with < 1024 kiB may be set to single bank dual banks */
 	if ((flash_size_in_kb == 1024) || !(options & OPT_DUALBANK))
@@ -716,12 +720,20 @@ static int get_stm32l4_info(struct flash_bank *bank, char *buf, int buf_size)
 	const char *device_str;
 
 	switch (device_id) {
+	case 0x461:
+		device_str = "STM32L496/4A6";
+		break;
+
 	case 0x415:
-		device_str = "STM32L4xx";
+		device_str = "STM32L475/476/486";
+		break;
+
+	case 0x462:
+		device_str = "STM32L45x/46x";
 		break;
 
 	case 0x435:
-		device_str = "STM32L43x";
+		device_str = "STM32L43x/44x";
 		break;
 
 	default:
@@ -934,4 +946,5 @@ struct flash_driver stm32l4x_flash = {
 	.erase_check = default_flash_blank_check,
 	.protect_check = stm32l4_protect_check,
 	.info = get_stm32l4_info,
+	.free_driver_priv = default_flash_free_driver_priv,
 };
