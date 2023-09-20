@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
  *   ESP32-S2 target for OpenOCD                                           *
@@ -13,35 +13,16 @@
 #include "assert.h"
 #include <target/target.h>
 #include <target/target_type.h>
+#include <target/semihosting_common.h>
 #include "esp_xtensa.h"
+#include "esp_xtensa_semihosting.h"
 
-/* Overall memory map
- * TODO: read memory configuration from target registers */
-#define ESP32_S2_IROM_MASK_LOW          0x40000000
-#define ESP32_S2_IROM_MASK_HIGH         0x40020000
-#define ESP32_S2_IRAM_LOW               0x40020000
-#define ESP32_S2_IRAM_HIGH              0x40070000
-#define ESP32_S2_DRAM_LOW               0x3ffb0000
-#define ESP32_S2_DRAM_HIGH              0x40000000
-#define ESP32_S2_RTC_IRAM_LOW           0x40070000
-#define ESP32_S2_RTC_IRAM_HIGH          0x40072000
-#define ESP32_S2_RTC_DRAM_LOW           0x3ff9e000
-#define ESP32_S2_RTC_DRAM_HIGH          0x3ffa0000
 #define ESP32_S2_RTC_DATA_LOW           0x50000000
 #define ESP32_S2_RTC_DATA_HIGH          0x50002000
-#define ESP32_S2_EXTRAM_DATA_LOW        0x3f500000
-#define ESP32_S2_EXTRAM_DATA_HIGH       0x3ff80000
 #define ESP32_S2_DR_REG_LOW             0x3f400000
 #define ESP32_S2_DR_REG_HIGH            0x3f4d3FFC
 #define ESP32_S2_SYS_RAM_LOW            0x60000000UL
 #define ESP32_S2_SYS_RAM_HIGH           (ESP32_S2_SYS_RAM_LOW + 0x20000000UL)
-/* ESP32-S2 DROM mapping is not contiguous. */
-/* IDF declares this as 0x3F000000..0x3FF80000, but there are peripheral registers mapped to
- * 0x3f400000..0x3f4d3FFC. */
-#define ESP32_S2_DROM0_LOW              ESP32_S2_DROM_LOW
-#define ESP32_S2_DROM0_HIGH             ESP32_S2_DR_REG_LOW
-#define ESP32_S2_DROM1_LOW              ESP32_S2_DR_REG_HIGH
-#define ESP32_S2_DROM1_HIGH             ESP32_S2_DROM_HIGH
 
 /* ESP32 WDT */
 #define ESP32_S2_WDT_WKEY_VALUE         0x50d83aa1
@@ -120,7 +101,7 @@ static int esp32s2_deassert_reset(struct target *target)
 	return ERROR_OK;
 }
 
-int esp32s2_soft_reset_halt(struct target *target)
+static int esp32s2_soft_reset_halt(struct target *target)
 {
 	LOG_TARGET_DEBUG(target, "begin");
 
@@ -383,7 +364,10 @@ static int esp32s2_arch_state(struct target *target)
 
 static int esp32s2_on_halt(struct target *target)
 {
-	return esp32s2_disable_wdts(target);
+	int ret = esp32s2_disable_wdts(target);
+	if (ret == ERROR_OK)
+		ret = esp_xtensa_on_halt(target);
+	return ret;
 }
 
 static int esp32s2_step(struct target *target, int current, target_addr_t address, int handle_breakpoints)
@@ -400,12 +384,27 @@ static int esp32s2_poll(struct target *target)
 {
 	enum target_state old_state = target->state;
 	int ret = esp_xtensa_poll(target);
+	if (ret != ERROR_OK)
+		return ret;
 
 	if (old_state != TARGET_HALTED && target->state == TARGET_HALTED) {
 		/* Call any event callbacks that are applicable */
 		if (old_state == TARGET_DEBUG_RUNNING) {
 			target_call_event_callbacks(target, TARGET_EVENT_DEBUG_HALTED);
 		} else {
+			if (esp_xtensa_semihosting(target, &ret) == SEMIHOSTING_HANDLED) {
+				struct esp_xtensa_common *esp_xtensa = target_to_esp_xtensa(target);
+				if (ret == ERROR_OK && esp_xtensa->semihost.need_resume) {
+					esp_xtensa->semihost.need_resume = false;
+					/* Resume xtensa_resume will handle BREAK instruction. */
+					ret = target_resume(target, 1, 0, 1, 0);
+					if (ret != ERROR_OK) {
+						LOG_ERROR("Failed to resume target");
+						return ret;
+					}
+				}
+				return ret;
+			}
 			esp32s2_on_halt(target);
 			target_call_event_callbacks(target, TARGET_EVENT_HALTED);
 		}
@@ -423,7 +422,11 @@ static int esp32s2_virt2phys(struct target *target,
 
 static int esp32s2_target_init(struct command_context *cmd_ctx, struct target *target)
 {
-	return esp_xtensa_target_init(cmd_ctx, target);
+	int ret = esp_xtensa_target_init(cmd_ctx, target);
+	if (ret != ERROR_OK)
+		return ret;
+
+	return esp_xtensa_semihosting_init(target);
 }
 
 static const struct xtensa_debug_ops esp32s2_dbg_ops = {
@@ -435,6 +438,10 @@ static const struct xtensa_debug_ops esp32s2_dbg_ops = {
 static const struct xtensa_power_ops esp32s2_pwr_ops = {
 	.queue_reg_read = xtensa_dm_queue_pwr_reg_read,
 	.queue_reg_write = xtensa_dm_queue_pwr_reg_write
+};
+
+static const struct esp_semihost_ops esp32s2_semihost_ops = {
+	.prepare = esp32s2_disable_wdts
 };
 
 static int esp32s2_target_create(struct target *target, Jim_Interp *interp)
@@ -454,7 +461,7 @@ static int esp32s2_target_create(struct target *target, Jim_Interp *interp)
 		return ERROR_FAIL;
 	}
 
-	int ret = esp_xtensa_init_arch_info(target, &esp32->esp_xtensa, &esp32s2_dm_cfg);
+	int ret = esp_xtensa_init_arch_info(target, &esp32->esp_xtensa, &esp32s2_dm_cfg, &esp32s2_semihost_ops);
 	if (ret != ERROR_OK) {
 		LOG_ERROR("Failed to init arch info!");
 		free(esp32);
@@ -470,6 +477,18 @@ static int esp32s2_target_create(struct target *target, Jim_Interp *interp)
 static const struct command_registration esp32s2_command_handlers[] = {
 	{
 		.chain = xtensa_command_handlers,
+	},
+	{
+		.name = "esp",
+		.usage = "",
+		.chain = esp32_apptrace_command_handlers,
+	},
+	{
+		.name = "arm",
+		.mode = COMMAND_ANY,
+		.help = "ARM Command Group",
+		.usage = "",
+		.chain = semihosting_common_handlers
 	},
 	COMMAND_REGISTRATION_DONE
 };

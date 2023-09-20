@@ -58,6 +58,12 @@ enum arm_arch {
 	ARM_ARCH_V8M,
 };
 
+/** Known ARM implementor IDs */
+enum arm_implementor {
+	ARM_IMPLEMENTOR_ARM = 0x41,
+	ARM_IMPLEMENTOR_REALTEK = 0x72,
+};
+
 /**
  * Represent state of an ARM core.
  *
@@ -292,14 +298,14 @@ int armv4_5_run_algorithm(struct target *target,
 		int num_mem_params, struct mem_param *mem_params,
 		int num_reg_params, struct reg_param *reg_params,
 		target_addr_t entry_point, target_addr_t exit_point,
-		int timeout_ms, void *arch_info);
+		unsigned int timeout_ms, void *arch_info);
 int armv4_5_run_algorithm_inner(struct target *target,
 		int num_mem_params, struct mem_param *mem_params,
 		int num_reg_params, struct reg_param *reg_params,
 		uint32_t entry_point, uint32_t exit_point,
-		int timeout_ms, void *arch_info,
+		unsigned int timeout_ms, void *arch_info,
 		int (*run_it)(struct target *target, uint32_t exit_point,
-				int timeout_ms, void *arch_info));
+				unsigned int timeout_ms, void *arch_info));
 
 int arm_checksum_memory(struct target *target,
 		target_addr_t address, uint32_t count, uint32_t *checksum);
@@ -309,8 +315,5 @@ int arm_blank_check_memory(struct target *target,
 void arm_set_cpsr(struct arm *arm, uint32_t cpsr);
 struct reg *arm_reg_current(struct arm *arm, unsigned regnum);
 struct reg *armv8_reg_current(struct arm *arm, unsigned regnum);
-
-extern struct reg arm_gdb_dummy_fp_reg;
-extern struct reg arm_gdb_dummy_fps_reg;
 
 #endif /* OPENOCD_TARGET_ARM_H */

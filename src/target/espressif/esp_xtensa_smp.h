@@ -37,6 +37,7 @@ int esp_xtensa_smp_step(struct target *target,
 int esp_xtensa_smp_assert_reset(struct target *target);
 int esp_xtensa_smp_deassert_reset(struct target *target);
 int esp_xtensa_smp_soft_reset_halt(struct target *target);
+int esp_xtensa_smp_on_halt(struct target *target);
 int esp_xtensa_smp_watchpoint_add(struct target *target, struct watchpoint *watchpoint);
 int esp_xtensa_smp_watchpoint_remove(struct target *target, struct watchpoint *watchpoint);
 int esp_xtensa_smp_handle_target_event(struct target *target, enum target_event event, void *priv);
@@ -44,7 +45,8 @@ int esp_xtensa_smp_target_init(struct command_context *cmd_ctx, struct target *t
 int esp_xtensa_smp_init_arch_info(struct target *target,
 	struct esp_xtensa_smp_common *esp_xtensa_smp,
 	struct xtensa_debug_module_config *dm_cfg,
-	const struct esp_xtensa_smp_chip_ops *chip_ops);
+	const struct esp_xtensa_smp_chip_ops *chip_ops,
+	const struct esp_semihost_ops *semihost_ops);
 
 extern const struct command_registration esp_xtensa_smp_command_handlers[];
 extern const struct command_registration esp_xtensa_smp_xtensa_command_handlers[];

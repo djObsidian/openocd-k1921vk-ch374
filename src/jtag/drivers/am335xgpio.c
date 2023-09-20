@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
  *   Copyright (C) 2022 by Steve Marple, stevemarple@googlemail.com        *
@@ -184,7 +184,8 @@ static void initialize_gpio(enum adapter_gpio_config_index idx)
 	}
 
 	/* Direction for non push-pull is already set by set_gpio_value() */
-	if (adapter_gpio_config[idx].drive == ADAPTER_GPIO_DRIVE_MODE_PUSH_PULL)
+	if (adapter_gpio_config[idx].drive == ADAPTER_GPIO_DRIVE_MODE_PUSH_PULL
+		&& adapter_gpio_config[idx].init_state != ADAPTER_GPIO_INIT_STATE_INPUT)
 		AM335XGPIO_SET_OUTPUT(&adapter_gpio_config[idx]);
 }
 

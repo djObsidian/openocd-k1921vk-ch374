@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
  *   Xtensa Chip-level Target Support for OpenOCD                          *
@@ -15,6 +15,7 @@
 #include <target/arm_adi_v5.h>
 #include <rtos/rtos.h>
 #include "xtensa_chip.h"
+#include "xtensa_fileio.h"
 
 int xtensa_chip_init_arch_info(struct target *target, void *arch_info,
 	struct xtensa_debug_module_config *dm_cfg)
@@ -30,7 +31,10 @@ int xtensa_chip_init_arch_info(struct target *target, void *arch_info,
 
 int xtensa_chip_target_init(struct command_context *cmd_ctx, struct target *target)
 {
-	return xtensa_target_init(cmd_ctx, target);
+	int ret = xtensa_target_init(cmd_ctx, target);
+	if (ret != ERROR_OK)
+		return ret;
+	return xtensa_fileio_init(target);
 }
 
 int xtensa_chip_arch_state(struct target *target)
@@ -45,10 +49,12 @@ static int xtensa_chip_poll(struct target *target)
 
 	if (old_state != TARGET_HALTED && target->state == TARGET_HALTED) {
 		/*Call any event callbacks that are applicable */
-		if (old_state == TARGET_DEBUG_RUNNING)
+		if (old_state == TARGET_DEBUG_RUNNING) {
 			target_call_event_callbacks(target, TARGET_EVENT_DEBUG_HALTED);
-		else
+		} else {
+			xtensa_fileio_detect_proc(target);
 			target_call_event_callbacks(target, TARGET_EVENT_HALTED);
+		}
 	}
 
 	return ret;
@@ -83,10 +89,23 @@ static int xtensa_chip_target_create(struct target *target, Jim_Interp *interp)
 		.tap = NULL,
 		.queue_tdi_idle = NULL,
 		.queue_tdi_idle_arg = NULL,
+		.dap = NULL,
+		.debug_ap = NULL,
+		.debug_apsel = DP_APSEL_INVALID,
+		.ap_offset = 0,
 	};
 
-	xtensa_chip_dm_cfg.tap = target->tap;
-	LOG_DEBUG("JTAG: %s:%s pos %d", target->tap->chip, target->tap->tapname, target->tap->abs_chain_position);
+	struct adiv5_private_config *pc = target->private_config;
+	if (adiv5_verify_config(pc) == ERROR_OK) {
+		xtensa_chip_dm_cfg.dap = pc->dap;
+		xtensa_chip_dm_cfg.debug_apsel = pc->ap_num;
+		xtensa_chip_dm_cfg.ap_offset = target->dbgbase;
+		LOG_DEBUG("DAP: ap_num %" PRId64 " DAP %p\n", pc->ap_num, pc->dap);
+	} else {
+		xtensa_chip_dm_cfg.tap = target->tap;
+		LOG_DEBUG("JTAG: %s:%s pos %d", target->tap->chip, target->tap->tapname,
+			target->tap->abs_chain_position);
+	}
 
 	struct xtensa_chip_common *xtensa_chip = calloc(1, sizeof(struct xtensa_chip_common));
 	if (!xtensa_chip) {
@@ -107,7 +126,7 @@ static int xtensa_chip_target_create(struct target *target, Jim_Interp *interp)
 	return ERROR_OK;
 }
 
-void xtensa_chip_target_deinit(struct target *target)
+static void xtensa_chip_target_deinit(struct target *target)
 {
 	struct xtensa *xtensa = target_to_xtensa(target);
 	xtensa_target_deinit(target);
@@ -116,13 +135,26 @@ void xtensa_chip_target_deinit(struct target *target)
 
 static int xtensa_chip_examine(struct target *target)
 {
-	return xtensa_examine(target);
+	struct xtensa *xtensa = target_to_xtensa(target);
+	int retval = xtensa_dm_examine(&xtensa->dbg_mod);
+	if (retval == ERROR_OK)
+		retval = xtensa_examine(target);
+	return retval;
 }
 
-int xtensa_chip_jim_configure(struct target *target, struct jim_getopt_info *goi)
+static int xtensa_chip_jim_configure(struct target *target, struct jim_getopt_info *goi)
 {
-	target->has_dap = false;
-	return JIM_CONTINUE;
+	static bool dap_configured;
+	int ret = adiv5_jim_configure(target, goi);
+	if (ret == JIM_OK) {
+		LOG_DEBUG("xtensa '-dap' target option found");
+		dap_configured = true;
+	}
+	if (!dap_configured) {
+		LOG_DEBUG("xtensa '-dap' target option not yet found, assuming JTAG...");
+		target->has_dap = false;
+	}
+	return ret;
 }
 
 /** Methods for generic example of Xtensa-based chip-level targets. */
@@ -167,4 +199,7 @@ struct target_type xtensa_chip_target = {
 	.gdb_query_custom = xtensa_gdb_query_custom,
 
 	.commands = xtensa_command_handlers,
+
+	.get_gdb_fileio_info = xtensa_get_gdb_fileio_info,
+	.gdb_fileio_end = xtensa_gdb_fileio_end,
 };

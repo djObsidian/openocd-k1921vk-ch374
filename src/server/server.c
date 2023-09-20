@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
@@ -745,6 +745,11 @@ int connection_read(struct connection *connection, void *data, int len)
 		return read_socket(connection->fd, data, len);
 	else
 		return read(connection->fd, data, len);
+}
+
+bool openocd_is_shutdown_pending(void)
+{
+	return shutdown_openocd != CONTINUE_MAIN_LOOP;
 }
 
 /* tell the server we want to shut down */

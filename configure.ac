@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 AC_PREREQ([2.69])
-AC_INIT([openocd], [0.11.0+dev],
+AC_INIT([openocd], [0.12.0+dev],
   [OpenOCD Mailing List <openocd-devel@lists.sourceforge.net>])
 AC_CONFIG_SRCDIR([src/openocd.c])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -55,12 +55,10 @@ AC_CHECK_HEADERS([elf.h])
 AC_EGREP_HEADER(Elf64_Ehdr, [elf.h], [
   AC_DEFINE([HAVE_ELF64], [1], [Define to 1 if the system has the type `Elf64_Ehdr'.])
 ])
-AC_CHECK_HEADERS([dirent.h])
 AC_CHECK_HEADERS([fcntl.h])
 AC_CHECK_HEADERS([malloc.h])
 AC_CHECK_HEADERS([netdb.h])
 AC_CHECK_HEADERS([poll.h])
-AC_CHECK_HEADERS([pthread.h])
 AC_CHECK_HEADERS([strings.h])
 AC_CHECK_HEADERS([sys/ioctl.h])
 AC_CHECK_HEADERS([sys/param.h])
@@ -70,7 +68,7 @@ AC_CHECK_HEADERS([sys/sysctl.h])
 AC_CHECK_HEADERS([sys/time.h])
 AC_CHECK_HEADERS([sys/types.h])
 AC_CHECK_HEADERS([unistd.h])
-AC_CHECK_HEADERS([arpa/inet.h ifaddrs.h netinet/in.h netinet/tcp.h net/if.h], [], [], [dnl
+AC_CHECK_HEADERS([arpa/inet.h netinet/in.h netinet/tcp.h], [], [], [dnl
 #include <stdio.h>
 #ifdef STDC_HEADERS
 # include <stdlib.h>
@@ -94,7 +92,6 @@ AC_CHECK_FUNCS([strndup])
 AC_CHECK_FUNCS([strnlen])
 AC_CHECK_FUNCS([gettimeofday])
 AC_CHECK_FUNCS([usleep])
-AC_CHECK_FUNCS([vasprintf])
 AC_CHECK_FUNCS([realpath])
 
 # guess-rev.sh only exists in the repository, not in the released archives
@@ -121,6 +118,7 @@ m4_define([USB1_ADAPTERS],
 	[[stlink], [ST-Link Programmer], [HLADAPTER_STLINK]],
 	[[ti_icdi], [TI ICDI JTAG Programmer], [HLADAPTER_ICDI]],
 	[[ulink], [Keil ULINK JTAG Programmer], [ULINK]],
+	[[angie], [ANGIE Adapter], [ANGIE]],
 	[[usb_blaster_2], [Altera USB-Blaster II Compatible], [USB_BLASTER_2]],
 	[[ft232r], [Bitbang mode of FT232R based devices], [FT232R]],
 	[[vsllink], [Versaloon-Link JTAG Programmer], [VSLLINK]],
@@ -132,9 +130,6 @@ m4_define([USB1_ADAPTERS],
 	[[rlink], [Raisonance RLink JTAG Programmer], [RLINK]],
 	[[usbprog], [USBProg JTAG Programmer], [USBPROG]],
 	[[esp_usb_jtag], [Espressif JTAG Programmer], [ESP_USB_JTAG]]])
-
-m4_define([DEPRECATED_USB1_ADAPTERS],
-	[[[aice], [Andes JTAG Programmer (deprecated)], [AICE]]])
 
 m4_define([HIDAPI_ADAPTERS],
 	[[[cmsis_dap], [CMSIS-DAP Compliant Debugger], [CMSIS_DAP_HID]],
@@ -247,6 +242,10 @@ AC_ARG_ENABLE([rshim],
   AS_HELP_STRING([--enable-rshim], [Enable building the rshim driver]),
   [build_rshim=$enableval], [build_rshim=no])
 
+AC_ARG_ENABLE([dmem],
+  AS_HELP_STRING([--enable-dmem], [Enable building the dmem driver]),
+  [build_dmem=$enableval], [build_dmem=no])
+
 m4_define([AC_ARG_ADAPTERS], [
   m4_foreach([adapter], [$1],
 	[AC_ARG_ENABLE(ADAPTER_OPT([adapter]),
@@ -266,8 +265,6 @@ AC_ARG_ADAPTERS([
   SERIAL_PORT_ADAPTERS,
   LIBJAYLINK_ADAPTERS
   ],[auto])
-
-AC_ARG_ADAPTERS([DEPRECATED_USB1_ADAPTERS],[no])
 
 AC_ARG_ENABLE([parport],
   AS_HELP_STRING([--enable-parport], [Enable building the pc parallel port driver]),
@@ -365,6 +362,10 @@ AS_CASE([$host_os],
         AC_MSG_ERROR([build_rshim is only available on linux or freebsd])
       ])
     ])
+
+    AS_IF([test "x$build_dmem" = "xyes"], [
+      AC_MSG_ERROR([dmem is only available on linux])
+    ])
 ])
 
 AC_ARG_ENABLE([internal-jimtcl],
@@ -376,9 +377,9 @@ AC_ARG_ENABLE([jimtcl-maintainer],
   [use_internal_jimtcl_maintainer=$enableval], [use_internal_jimtcl_maintainer=no])
 
 AC_ARG_ENABLE([internal-libjaylink],
-  AS_HELP_STRING([--disable-internal-libjaylink],
-  [Disable building internal libjaylink]),
-  [use_internal_libjaylink=$enableval], [use_internal_libjaylink=yes])
+  AS_HELP_STRING([--enable-internal-libjaylink],
+  [Enable building internal libjaylink]),
+  [use_internal_libjaylink=$enableval], [use_internal_libjaylink=no])
 
 AC_ARG_ENABLE([remote-bitbang],
   AS_HELP_STRING([--enable-remote-bitbang], [Enable building support for the Remote Bitbang jtag driver]),
@@ -485,6 +486,12 @@ AS_IF([test "x$build_rshim" = "xyes"], [
   AC_DEFINE([BUILD_RSHIM], [0], [0 if you don't want to debug BlueField SoC via rshim.])
 ])
 
+AS_IF([test "x$build_dmem" = "xyes"], [
+  AC_DEFINE([BUILD_DMEM], [1], [1 if you want to debug via Direct Mem.])
+], [
+  AC_DEFINE([BUILD_DMEM], [0], [0 if you don't want to debug via Direct Mem.])
+])
+
 AS_IF([test "x$build_dummy" = "xyes"], [
   build_bitbang=yes
   AC_DEFINE([BUILD_DUMMY], [1], [1 if you want dummy driver.])
@@ -577,11 +584,11 @@ AS_IF([test "x$enable_buspirate" != "xno"], [
 ])
 
 AS_IF([test "x$use_internal_jimtcl" = "xyes"], [
-  AS_IF([test -f "$srcdir/jimtcl/configure.ac"], [
+  AS_IF([test -f "$srcdir/jimtcl/configure"], [
     AS_IF([test "x$use_internal_jimtcl_maintainer" = "xyes"], [
-      jimtcl_config_options="--disable-install-jim --with-ext=json --maintainer"
+      jimtcl_config_options="--disable-install-jim --with-ext=json --minimal --disable-ssl --maintainer"
     ], [
-      jimtcl_config_options="--disable-install-jim --with-ext=json"
+      jimtcl_config_options="--disable-install-jim --with-ext=json --minimal --disable-ssl"
     ])
     AX_CONFIG_SUBDIR_OPTION([jimtcl], [$jimtcl_config_options])
   ], [
@@ -634,12 +641,15 @@ AS_IF([test "x$enable_capstone" != xno], [
 	PKG_CHECK_MODULES([CAPSTONE], [capstone], [
 		AC_DEFINE([HAVE_CAPSTONE], [1], [1 if you have Capstone disassembly framework.])
 	], [
-		AC_DEFINE([HAVE_CAPSTONE], [0], [0 if you don't have Capstone disassembly framework.])
 		if test "x$enable_capstone" != xauto; then
 			AC_MSG_ERROR([--with-capstone was given, but test for Capstone failed])
 		fi
 		enable_capstone=no
 	])
+])
+
+AS_IF([test "x$enable_capstone" == xno], [
+	AC_DEFINE([HAVE_CAPSTONE], [0], [0 if you don't have Capstone disassembly framework.])
 ])
 
 for hidapi_lib in hidapi hidapi-hidraw hidapi-libusb; do
@@ -684,7 +694,6 @@ m4_define([PROCESS_ADAPTERS], [
 ])
 
 PROCESS_ADAPTERS([USB1_ADAPTERS], ["x$use_libusb1" = "xyes"], [libusb-1.x])
-PROCESS_ADAPTERS([DEPRECATED_USB1_ADAPTERS], ["x$use_libusb1" = "xyes"], [libusb-1.x])
 PROCESS_ADAPTERS([HIDAPI_ADAPTERS], ["x$use_hidapi" = "xyes"], [hidapi])
 PROCESS_ADAPTERS([HIDAPI_USB1_ADAPTERS], ["x$use_hidapi" = "xyes" -a "x$use_libusb1" = "xyes"], [hidapi and libusb-1.x])
 PROCESS_ADAPTERS([LIBFTDI_ADAPTERS], ["x$use_libftdi" = "xyes"], [libftdi])
@@ -713,7 +722,7 @@ AS_IF([test "x$enable_jlink" != "xno"], [
       AX_CONFIG_SUBDIR_OPTION([src/jtag/drivers/libjaylink],
 		[--enable-subproject-build])
     ], [
-      AC_MSG_ERROR([Internal libjaylink not found, run either 'git submodule init' and 'git submodule update' or disable internal libjaylink with --disable-internal-libjaylink.])
+      AC_MSG_ERROR([Internal libjaylink not found, run 'git submodule init' and 'git submodule update'.])
     ])
   ])
 ])
@@ -759,6 +768,7 @@ AM_CONDITIONAL([USE_LIBGPIOD], [test "x$use_libgpiod" = "xyes"])
 AM_CONDITIONAL([USE_HIDAPI], [test "x$use_hidapi" = "xyes"])
 AM_CONDITIONAL([USE_LIBJAYLINK], [test "x$use_libjaylink" = "xyes"])
 AM_CONDITIONAL([RSHIM], [test "x$build_rshim" = "xyes"])
+AM_CONDITIONAL([DMEM], [test "x$build_dmem" = "xyes"])
 AM_CONDITIONAL([HAVE_CAPSTONE], [test "x$enable_capstone" != "xno"])
 
 AM_CONDITIONAL([INTERNAL_JIMTCL], [test "x$use_internal_jimtcl" = "xyes"])
@@ -823,12 +833,17 @@ AC_CONFIG_FILES([
 ])
 AC_OUTPUT
 
+AS_IF([test "x$enable_jlink" != "xno"], [
+  AS_IF([test "x$use_internal_libjaylink" = "xyes"], [
+    AC_MSG_WARN([Using the internal libjaylink is deprecated and will not be possible in the future.])
+  ]])
+)
+
 echo
 echo
 echo OpenOCD configuration summary
 echo --------------------------------------------------
 m4_foreach([adapter], [USB1_ADAPTERS,
-	DEPRECATED_USB1_ADAPTERS,
 	HIDAPI_ADAPTERS, HIDAPI_USB1_ADAPTERS, LIBFTDI_ADAPTERS,
 	LIBFTDI_USB1_ADAPTERS,
 	LIBGPIOD_ADAPTERS,

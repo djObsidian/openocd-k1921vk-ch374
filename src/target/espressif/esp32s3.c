@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
  *   ESP32-S3 target API for OpenOCD                                       *
@@ -13,6 +13,7 @@
 #include <target/target.h>
 #include <target/target_type.h>
 #include <target/smp.h>
+#include <target/semihosting_common.h>
 #include "assert.h"
 #include "esp_xtensa_smp.h"
 
@@ -23,16 +24,6 @@ implementation.
 */
 
 /* ESP32_S3 memory map */
-#define ESP32_S3_IRAM_LOW               0x40370000
-#define ESP32_S3_IRAM_HIGH              0x403E0000
-#define ESP32_S3_IROM_MASK_LOW          0x40000000
-#define ESP32_S3_IROM_MASK_HIGH         0x40060000
-#define ESP32_S3_DRAM_LOW               0x3FC88000
-#define ESP32_S3_DRAM_HIGH              0x3FD00000
-#define ESP32_S3_RTC_IRAM_LOW           0x600FE000
-#define ESP32_S3_RTC_IRAM_HIGH          0x60100000
-#define ESP32_S3_RTC_DRAM_LOW           0x600FE000
-#define ESP32_S3_RTC_DRAM_HIGH          0x60100000
 #define ESP32_S3_RTC_DATA_LOW           0x50000000
 #define ESP32_S3_RTC_DATA_HIGH          0x50002000
 #define ESP32_S3_EXTRAM_DATA_LOW        0x3D000000
@@ -95,7 +86,7 @@ struct esp32s3_common {
  * PRO CPU is halted, APP CPU is in reset.
  */
 
-const uint8_t esp32s3_reset_stub_code[] = {
+static const uint8_t esp32s3_reset_stub_code[] = {
 #include "../../../contrib/loaders/reset/espressif/esp32s3/cpu_reset_handler_code.inc"
 };
 
@@ -282,7 +273,10 @@ static int esp32s3_disable_wdts(struct target *target)
 
 static int esp32s3_on_halt(struct target *target)
 {
-	return esp32s3_disable_wdts(target);
+	int ret = esp32s3_disable_wdts(target);
+	if (ret == ERROR_OK)
+		ret = esp_xtensa_smp_on_halt(target);
+	return ret;
 }
 
 static int esp32s3_arch_state(struct target *target)
@@ -302,7 +296,7 @@ static int esp32s3_virt2phys(struct target *target,
 
 static int esp32s3_target_init(struct command_context *cmd_ctx, struct target *target)
 {
-	return esp_xtensa_target_init(cmd_ctx, target);
+	return esp_xtensa_smp_target_init(cmd_ctx, target);
 }
 
 static const struct xtensa_debug_ops esp32s3_dbg_ops = {
@@ -319,6 +313,10 @@ static const struct xtensa_power_ops esp32s3_pwr_ops = {
 static const struct esp_xtensa_smp_chip_ops esp32s3_chip_ops = {
 	.reset = esp32s3_soc_reset,
 	.on_halt = esp32s3_on_halt
+};
+
+static const struct esp_semihost_ops esp32s3_semihost_ops = {
+	.prepare = esp32s3_disable_wdts
 };
 
 static int esp32s3_target_create(struct target *target, Jim_Interp *interp)
@@ -340,7 +338,8 @@ static int esp32s3_target_create(struct target *target, Jim_Interp *interp)
 	int ret = esp_xtensa_smp_init_arch_info(target,
 		&esp32s3->esp_xtensa_smp,
 		&esp32s3_dm_cfg,
-		&esp32s3_chip_ops);
+		&esp32s3_chip_ops,
+		&esp32s3_semihost_ops);
 	if (ret != ERROR_OK) {
 		LOG_ERROR("Failed to init arch info!");
 		free(esp32s3);
@@ -359,9 +358,21 @@ static const struct command_registration esp32s3_command_handlers[] = {
 		.chain = esp_xtensa_smp_command_handlers,
 	},
 	{
+		.name = "esp",
+		.usage = "",
+		.chain = esp32_apptrace_command_handlers,
+	},
+	{
 		.name = "esp32",
 		.usage = "",
 		.chain = smp_command_handlers,
+	},
+	{
+		.name = "arm",
+		.mode = COMMAND_ANY,
+		.help = "ARM Command Group",
+		.usage = "",
+		.chain = semihosting_common_handlers
 	},
 	COMMAND_REGISTRATION_DONE
 };

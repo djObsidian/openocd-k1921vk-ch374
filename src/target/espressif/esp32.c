@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /***************************************************************************
  *   ESP32 target API for OpenOCD                                          *
@@ -13,6 +13,7 @@
 #include <target/target.h>
 #include <target/target_type.h>
 #include <target/smp.h>
+#include <target/semihosting_common.h>
 #include "assert.h"
 #include "esp_xtensa_smp.h"
 
@@ -23,20 +24,8 @@ implementation.
 */
 
 /* ESP32 memory map */
-#define ESP32_DRAM_LOW            0x3ffae000
-#define ESP32_DRAM_HIGH           0x40000000
-#define ESP32_IROM_MASK_LOW       0x40000000
-#define ESP32_IROM_MASK_HIGH      0x40064f00
-#define ESP32_IRAM_LOW            0x40070000
-#define ESP32_IRAM_HIGH           0x400a0000
-#define ESP32_RTC_IRAM_LOW        0x400c0000
-#define ESP32_RTC_IRAM_HIGH       0x400c2000
-#define ESP32_RTC_DRAM_LOW        0x3ff80000
-#define ESP32_RTC_DRAM_HIGH       0x3ff82000
 #define ESP32_RTC_DATA_LOW        0x50000000
 #define ESP32_RTC_DATA_HIGH       0x50002000
-#define ESP32_EXTRAM_DATA_LOW     0x3f800000
-#define ESP32_EXTRAM_DATA_HIGH    0x3fc00000
 #define ESP32_DR_REG_LOW          0x3ff00000
 #define ESP32_DR_REG_HIGH         0x3ff71000
 #define ESP32_SYS_RAM_LOW         0x60000000UL
@@ -100,7 +89,7 @@ static inline struct esp32_common *target_to_esp32(struct target *target)
  * 6. restore initial PC and the contents of ESP32_SMP_RTC_DATA_LOW
  * TODO: some state of RTC_CNTL is not reset during SW_SYS_RST. Need to reset that manually. */
 
-const uint8_t esp32_reset_stub_code[] = {
+static const uint8_t esp32_reset_stub_code[] = {
 #include "../../../contrib/loaders/reset/espressif/esp32/cpu_reset_handler_code.inc"
 };
 
@@ -265,7 +254,10 @@ static int esp32_disable_wdts(struct target *target)
 
 static int esp32_on_halt(struct target *target)
 {
-	return esp32_disable_wdts(target);
+	int ret = esp32_disable_wdts(target);
+	if (ret == ERROR_OK)
+		ret = esp_xtensa_smp_on_halt(target);
+	return ret;
 }
 
 static int esp32_arch_state(struct target *target)
@@ -329,6 +321,10 @@ static const struct esp_xtensa_smp_chip_ops esp32_chip_ops = {
 	.on_halt = esp32_on_halt
 };
 
+static const struct esp_semihost_ops esp32_semihost_ops = {
+	.prepare = esp32_disable_wdts
+};
+
 static int esp32_target_create(struct target *target, Jim_Interp *interp)
 {
 	struct xtensa_debug_module_config esp32_dm_cfg = {
@@ -346,7 +342,7 @@ static int esp32_target_create(struct target *target, Jim_Interp *interp)
 	}
 
 	int ret = esp_xtensa_smp_init_arch_info(target, &esp32->esp_xtensa_smp,
-		&esp32_dm_cfg, &esp32_chip_ops);
+		&esp32_dm_cfg, &esp32_chip_ops, &esp32_semihost_ops);
 	if (ret != ERROR_OK) {
 		LOG_ERROR("Failed to init arch info!");
 		free(esp32);
@@ -360,7 +356,7 @@ static int esp32_target_create(struct target *target, Jim_Interp *interp)
 	return ERROR_OK;
 }
 
-COMMAND_HELPER(esp32_cmd_flashbootstrap_do, struct esp32_common *esp32)
+static COMMAND_HELPER(esp32_cmd_flashbootstrap_do, struct esp32_common *esp32)
 {
 	int state = -1;
 
@@ -436,6 +432,11 @@ static const struct command_registration esp32_command_handlers[] = {
 		.chain = esp_xtensa_smp_command_handlers,
 	},
 	{
+		.name = "esp",
+		.usage = "",
+		.chain = esp32_apptrace_command_handlers,
+	},
+	{
 		.name = "esp32",
 		.usage = "",
 		.chain = smp_command_handlers,
@@ -444,6 +445,13 @@ static const struct command_registration esp32_command_handlers[] = {
 		.name = "esp32",
 		.usage = "",
 		.chain = esp32_any_command_handlers,
+	},
+	{
+		.name = "arm",
+		.mode = COMMAND_ANY,
+		.help = "ARM Command Group",
+		.usage = "",
+		.chain = semihosting_common_handlers
 	},
 	COMMAND_REGISTRATION_DONE
 };
