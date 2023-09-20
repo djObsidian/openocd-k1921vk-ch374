@@ -1228,7 +1228,7 @@ static int get_k1921vk035_info(struct flash_bank *bank, struct command_invocatio
 }
 
 
-struct flash_driver k1921vk035_flash = {
+const struct flash_driver k1921vk035_flash = {
     .name = "k1921vk035",
     .usage = "flash bank <name> k1921vk035 <base> <size> 0 0 <target#>",
     .commands = k1921vk035_command_handlers,
