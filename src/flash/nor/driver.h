@@ -264,6 +264,7 @@ extern const struct flash_driver fm4_flash;
 extern const struct flash_driver jtagspi_flash;
 extern const struct flash_driver k1921vk028_flash;
 extern const struct flash_driver k1921vk035_flash;
+extern const struct flash_driver k1921vg015_flash;
 extern const struct flash_driver kinetis_flash;
 extern const struct flash_driver kinetis_ke_flash;
 extern const struct flash_driver lpc2000_flash;
