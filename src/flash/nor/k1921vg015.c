@@ -604,7 +604,7 @@ COMMAND_HANDLER(k1921vg015_handle_srv_erase_command)
 	command_print(CMD, "Try to perform service mode erase - all flash memories will be erased\n"
 						   "Please wait ... ");
 
-	retval = target_write_u32(target, PMUSYS_SERVCTL, PMUSYS_SERVCTL_SERVEN);
+	retval = target_write_u32(target, PMUSYS_SERVCTL, PMUSYS_SERVCTL_DONE);
 	if (retval != ERROR_OK)
 		return retval;
 
