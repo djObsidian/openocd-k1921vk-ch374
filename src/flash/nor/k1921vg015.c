@@ -823,6 +823,111 @@ static int k1921vg015_protect(struct flash_bank *bank, int set, unsigned int fir
     return retval;
 }
 
+static int k1921vg015_write_block(struct flash_bank *bank, const uint8_t *buffer,
+        uint32_t offset, uint32_t count)
+{
+    const uint32_t block_size = MFLASH_WORD_WIDTH * 4;
+    const uint32_t stack_size = 128;
+    const uint32_t stack_align = 16;
+    target_addr_t stack_aligned_addr = 0;
+    struct target *target = bank->target;
+    uint32_t buffer_size;
+    struct working_area *write_algorithm;
+	struct working_area *stack_area;
+    struct working_area *source;
+    uint32_t target_address;
+    struct reg_param reg_params[5];
+    int retval = ERROR_OK;
+
+    static const uint8_t k1921vg015_flash_write_code[] = {
+#include "../../../contrib/loaders/flash/niiet/k1921vg015/k1921vg015.inc"
+    };
+
+	LOG_INFO("Start block write");
+    /* flash write code */
+    if (target_alloc_working_area(target, sizeof(k1921vg015_flash_write_code),
+            &write_algorithm) != ERROR_OK) {
+        LOG_WARNING("no working area available, can't do block memory writes");
+        return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+    }
+
+    retval = target_write_buffer(target, write_algorithm->address,
+            sizeof(k1921vg015_flash_write_code),k1921vg015_flash_write_code);
+    if (retval != ERROR_OK)
+        return retval;
+
+	/* alloc stack memory */
+    if (target_alloc_working_area(target, stack_size + stack_align,
+            &stack_area) != ERROR_OK) {
+        LOG_WARNING("no working area available, can't do block memory writes");
+        return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+    }
+	stack_aligned_addr = (stack_area->address + stack_align) & ~(stack_align - 1); // align to 16
+
+    buffer_size = target_get_working_area_avail(target);
+	buffer_size = MIN(count * block_size, MAX(buffer_size, MFLASH_PAGE_SIZE)); 
+	LOG_INFO("buffer_size %d, count %d", buffer_size, count);
+
+
+	retval = target_alloc_working_area(target, buffer_size, &source);
+	/* Allocated size is always 32-bit word aligned */
+	if (retval != ERROR_OK) {
+		target_free_working_area(target, write_algorithm);
+		LOG_WARNING("no large enough working area available, can't do block memory writes");
+		/* target_alloc_working_area() may return ERROR_FAIL if area backup fails:
+		 * convert any error to ERROR_TARGET_RESOURCE_NOT_AVAILABLE
+		 */
+		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+	}
+
+    init_reg_param(&reg_params[0], "a0", 32, PARAM_IN_OUT); /* write_cmd base (in), status (out) */
+    init_reg_param(&reg_params[1], "a1", 32, PARAM_OUT);    /* count (4*4 bytes) */
+    init_reg_param(&reg_params[2], "a2", 32, PARAM_OUT);    /* buffer start */
+    init_reg_param(&reg_params[3], "a3", 32, PARAM_IN_OUT); /* target address */
+	init_reg_param(&reg_params[4], "sp", 32, PARAM_OUT);
+    uint32_t flash_cmd;
+    flash_cmd = MFLASH_CMD_KEY | MFLASH_CMD_WR;
+    uint32_t thisrun_count= 0;
+    for (unsigned int i = 0; i < count; i += thisrun_count) {
+		thisrun_count = MIN(buffer_size/block_size, count - i);
+		target_address = offset + i;
+		LOG_INFO("thisrun_count %d, target_address 0x%x", thisrun_count,target_address);
+		buf_set_u32(reg_params[0].value, 0, 32, flash_cmd);
+    	buf_set_u32(reg_params[1].value, 0, 32, thisrun_count);
+    	buf_set_u32(reg_params[2].value, 0, 32, source->address);
+    	buf_set_u32(reg_params[3].value, 0, 32, target_address);
+		buf_set_u32(reg_params[4].value, 0, 32, stack_aligned_addr + stack_size);/* write stack pointer */
+		retval = target_write_buffer(target, source->address, thisrun_count * block_size, buffer + i * block_size);
+    	if (retval != ERROR_OK)
+        	return retval;
+		
+    	retval = target_run_algorithm(target,
+    	        0, NULL,
+    	        5, reg_params,
+    	        write_algorithm->address,
+    	        write_algorithm->address + 0x24,//exit point "asm("ebreak");"
+				30000, NULL);
+
+    	if (retval != ERROR_OK) {
+			LOG_ERROR("Failed to execute algorithm at target address 0x%x",
+					target_address); 
+			break;
+		}
+
+	}
+	
+
+    target_free_working_area(target, source);
+    target_free_working_area(target, write_algorithm);
+
+    destroy_reg_param(&reg_params[0]);
+    destroy_reg_param(&reg_params[1]);
+    destroy_reg_param(&reg_params[2]);
+    destroy_reg_param(&reg_params[3]);
+    destroy_reg_param(&reg_params[4]);
+
+    return retval;
+}
 
 
 static int k1921vg015_write(struct flash_bank *bank, const uint8_t *buffer,
@@ -830,14 +935,13 @@ static int k1921vg015_write(struct flash_bank *bank, const uint8_t *buffer,
 {
 	struct target *target = bank->target;
 	uint8_t *new_buffer = NULL;
-
 	if (bank->target->state != TARGET_HALTED) {
 		LOG_ERROR("Target not halted");
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
-	if (offset & 0x7) {
-		LOG_ERROR("offset 0x%" PRIx32 " breaks required 2-word alignment", offset);
+	if (offset & 0xF) {
+		LOG_ERROR("offset 0x%" PRIx32 " breaks required 4-word alignment", offset);
 		return ERROR_FLASH_DST_BREAKS_ALIGNMENT;
 	}
 
@@ -864,19 +968,23 @@ static int k1921vg015_write(struct flash_bank *bank, const uint8_t *buffer,
 	int retval;
 
 	/* try using block write */
-	//retval = k1921vk035_write_block(bank, buffer, offset, count/(MFLASH_WORD_WIDTH*4));
-	uint32_t flash_addr, flash_cmd, flash_data;
-
-		LOG_INFO("Plese wait ..."); /* it`s quite a long process */
+	retval = k1921vg015_write_block(bank, buffer, offset, count/(MFLASH_WORD_WIDTH*4));
+    //retval = ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+    uint32_t flash_addr, flash_cmd, flash_data;
+    return retval;
+    if (retval != ERROR_OK) {
+                /* if block write failed (no sufficient working area),
+                 * we use normal (slow) register accesses */
+		LOG_INFO("Block write failed, use slow mode"); /* it`s quite a long process */
 
 		flash_cmd = MFLASH_CMD_KEY | MFLASH_CMD_WR;
-		/* chose between main and nvr region */
 
 		/* write multiple bytes per try */
 		for (unsigned int i = 0; i < count; i += MFLASH_WORD_WIDTH*4) {
 			/* current addr */
-			LOG_INFO("%d byte of %d", i, count);
+			
 			flash_addr = offset + i;
+			LOG_INFO("%d byte of %d addr 0x%x", i, count,flash_addr);
 			retval = target_write_u32(target, MFLASH_ADDR, flash_addr);
 			if (retval != ERROR_OK)
 				goto free_buffer;
@@ -903,6 +1011,7 @@ static int k1921vg015_write(struct flash_bank *bank, const uint8_t *buffer,
 			if (retval != ERROR_OK)
 				goto free_buffer;
 		}
+	}
 
 free_buffer:
 	if (new_buffer)
