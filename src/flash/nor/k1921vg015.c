@@ -778,7 +778,7 @@ static int k1921vg015_erase(struct flash_bank *bank, unsigned int first, unsigne
 {
 	struct target *target = bank->target;
 	int retval = ERROR_FLASH_OPERATION_FAILED;
-
+	LOG_INFO("Erasing sectors from %u to %u", first, last);
 	if (bank->target->state != TARGET_HALTED) {
 		LOG_ERROR("Target not halted");
 		return ERROR_TARGET_NOT_HALTED;
