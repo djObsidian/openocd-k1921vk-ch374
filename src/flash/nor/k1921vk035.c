@@ -858,7 +858,7 @@ static int k1921vk035_mass_erase(struct flash_bank *bank)
     if (retval != ERROR_OK)
         return retval;
 
-    for (unsigned int i = 0; i <= bank->num_sectors; i++) {
+    for (unsigned int i = 0; i < bank->num_sectors; i++) {
         bank->sectors[i].is_erased = 1;
     }
 
@@ -1242,4 +1242,5 @@ const struct flash_driver k1921vk035_flash = {
     .erase_check = default_flash_blank_check,
     .protect_check = k1921vk035_protect_check,
     .info = get_k1921vk035_info,
+    .free_driver_priv = default_flash_free_driver_priv,
 };
