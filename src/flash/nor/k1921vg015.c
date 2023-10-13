@@ -138,7 +138,7 @@ static int k1921vg015_flash_mass_erase(struct target *target, uint32_t region)
 {
 	int retval = ERROR_OK;
 
-	uint32_t flash_cmd = MFLASH_CMD_KEY | MFLASH_CMD_ERALL;
+	uint32_t flash_cmd = MFLASH_CMD_KEY | MFLASH_CMD_ERALL| MFLASH_CMD_ERSEC;
 	if (region == NVR_REGION)
 		flash_cmd |= MFLASH_CMD_NVRON;
 
@@ -767,7 +767,7 @@ static int k1921vg015_mass_erase(struct flash_bank *bank)
 	if (retval != ERROR_OK)
 		return retval;
 
-	for (unsigned int i = 0; i <= bank->num_sectors; i++) {
+	for (unsigned int i = 0; i < bank->num_sectors; i++) {
 		bank->sectors[i].is_erased = 1;
 	}
 
@@ -1144,4 +1144,5 @@ const struct flash_driver k1921vg015_flash = {
 	.erase_check = default_flash_blank_check,
 	.protect_check = k1921vg015_protect_check,
 	.info = get_k1921vg015_info,
+	.free_driver_priv = default_flash_free_driver_priv,
 };
