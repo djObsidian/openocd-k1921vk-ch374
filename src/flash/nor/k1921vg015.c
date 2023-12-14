@@ -1075,7 +1075,7 @@ static int k1921vg015_probe(struct flash_bank *bank)
 				sizeof(k1921vg015_info->chip_brief),
 				"\n"
 				"[MEMORY CONFIGURATION]\n"
-				"Memory mapped to 0x%llx (will be used for writing and debugging):\n"
+				"Memory mapped to 0x%"PRIx64" (will be used for writing and debugging):\n"
 				"\n"
 				"[CFGWORD]\n"
 				"MFLASH main region write protection :\n"
